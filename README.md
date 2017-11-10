@@ -1,19 +1,52 @@
-#Spring Cloud学习
+# Spring Cloud学习
 
 罗洪佳 JAVA-AI _2017.11.08_    
 
 >[Spring-Cloud中文文档](https://demo.cc/spring-cloud-dalston.html)
 
-##0. 写在开始
-
-为什么要用微服务？
+## 0. 为什么要用Spring Cloud？
 
 在微服务架构中，当一个大型系统被拆分成微服务系统以后，不仅包括功能拆分，还包括系统拆分、代码拆分、数据库拆分、缓存拆分等，多个系统的部署、维护、调用关系、调度、监控、fail over就会成为一系列问题。同时微服务系统划分越多，调用链路可能会越长，调用链监控、全链路trace也会成为问题。
-自然和自然的法则在黑夜中隐藏，上帝说让牛顿诞生吧，于是一切都被照亮。spring cloud 就是这样诞生的。spring cloud为服务治理而生。
+而spring cloud 就是这样诞生的，它为服务治理而生。
 
-##1. Spring Cloud集成说明
+### 0.1 单体应用
+
+最开始工作的时候，我们的输出是一个大WAR包，采用SSI框架（SPRING+STRUTS+IBATIS）。所有的页面（JSP），控制层，服务全都打在一个包里。如果说有点服务的概念也是webservice这样的。 然后，我们的系统内部针对不同的业务进行了代码层级的拆分，比如订单，商品，客户这样的层级。
+大体上，是这样的：
+
+![](pic/0.1.png)
+
+### 0.2 服务化架构
+
+再后面，随着大后台，小前台概念的提出，要求做到大后台一次构建长久使用，前台随时改版，保持活力。我们开始尝试当时比较流行的DUBBO来拆分服务。并且对服务涉及的资源（数据库，内存等等）也进行了拆分。
+他大概是这样的：
+
+![](pic/0.2.png)
+
+### 0.3 微服务
+
+实际上服务化架构已经能够满足大部分的需求了，那我们为什么要用微服务呢？ 从网上摘抄了几点：
+
+* 微服务架构强调业务系统需要彻底的组件化和服务化，一个组件就是一个产品，可以独立对外提供服务
+* 微服务不再强调传统SOA架构里面比较重的ESB企业服务总线
+* 微服务强调每个微服务都有自己独立的运行空间，包括数据库资源。
+* 微服务架构本身来源于互联网的思路，因此组件对外发布的服务强调了采用HTTP Rest API的方式来进行
+* 微服务的切分粒度会更小
+
+### 0.4 为什么选Spring Cloud
+
+我们之前使用dubbo服务，也是微服务的一种解决方案，选Spring Cloud就在于他们的区别：
+
+* Spring Cloud的应用一个组件就是一个产品，可以独立对外提供服务。而dubbo很难直接对外提供服务，相互依赖严重，也有暴露自己后台架构的风险。
+* Spring Cloud的应用对外发布的服务采用HTTP Rest API的方式来进行。而dubbo采用RPC框架，虽然也可以支持HTTP，但实际生产中使用更多的是dubbo协议，这种协议并不是通用的，不利于扩展。
+* Spring Cloud是一个大框架，大体系。相对更加稳定成熟，各种配套齐全。而dubbo主要就是一个服务发现注册的组件。缺乏其他必要的支持。
+* Spirng Cloud天然支持Spring Boot，更加便于业务落地。
+
+## 1. 怎么用Spring Cloud？
 
 ![](pic/0.png)
+
+### 1.1 Spring Cloud集成说明
 
 _这些项目是Spring Cloud官方项目或是对Spring Cloud进行了有益的补充以及基于Spring Cloud最佳实践_
 
@@ -63,9 +96,7 @@ _这些项目是Spring Cloud官方项目或是对Spring Cloud进行了有益的�
 
     Feign是一种声明式、模板化的HTTP客户端。
 
-##2. Spring Cloud特性
-
-###特性
+### 1.2. Spring Cloud特性
 
 - Spring Cloud专注于提供良好的开箱即用经验的典型用例和可扩展性机制覆盖。
 
@@ -83,7 +114,7 @@ _这些项目是Spring Cloud官方项目或是对Spring Cloud进行了有益的�
 
 - 分布式消息传递
 
-##3. 示例
+### 1.3. 示例
 
 <pre>
 本示例主要涉及到：Spring boot, Eureka, Ribbon, Feign, Hystrix, Zuul
@@ -97,9 +128,10 @@ _这些项目是Spring Cloud官方项目或是对Spring Cloud进行了有益的�
 |demo-provider-service|	服务提供者|	http://127.0.0.1:9995/service/hi/习大大 http://127.0.0.1:9996/service/hi/彭麻麻|
 |demo-eureka-server|分布式服务注册中心(单点)	|http://127.0.0.1:9999|
 |demo-eureka-server-high|分布式服务注册中心(高可用版本)|	http://127.0.0.1:9998 http://127.0.0.1:9997|
-|api-gateway|网关服务|	http://127.0.0.1:5555/api-a/api/hi/习大大
+|demo-zuul-server|网关服务|	http://127.0.0.1:5555/api-a/api/hi/习大大
+|demo-config-server|配置服务（待定）|	http://127.0.0.1:7777/config
 
-### 3.1 demo-provider-service 服务提供者
+#### 1.3.1 demo-provider-service 服务提供者
 
 先看服务接口，和 **dubbo** 一样
 
@@ -155,7 +187,7 @@ public class UserController {
 </code>
 </pre>
 
-###3.2 demo-consumer-h5 服务消费者
+#### 1.3.2 demo-consumer-h5 服务消费者
 
 和dubbo不一样的是，spring cloud的微服务是http接口的，所以可以直接使用我们平时调用http的方法去消费。
 
@@ -215,7 +247,7 @@ public class UserController {
 
 ![消费者直连生产者](pic/1.png)
 
-###3.3 使用Eureka实现服务发现组件
+#### 1.3.3 使用Eureka实现服务发现组件
 
 很明显，直连的方式在真正的项目落地的时候不可取。因此需要一个服务发现和注册的组件，Spring Cloud提供了Eureka。
 
@@ -257,7 +289,7 @@ eureka.server.enable-self-preservation=false
 
 ![Eureka界面](pic/2.png)
 
-###3.4 服务注册
+#### 1.3.4 服务注册
 
 搭建好Eureka注册中心后，就可以将刚才的service注册到上面。
 
@@ -305,7 +337,7 @@ eureka.server.enable-self-preservation=false
 
 ![服务注册](pic/3.png)
 
-###3.5 Eureka Server 高可用实现
+#### 1.3.5 Eureka Server 高可用实现
 
 我们使用dubbo注册服务的时候，会同时启用多个zk，形成集群，保证服务注册中心非单点。使用Eureka也是这样的。
 
@@ -393,7 +425,7 @@ eureka.client.service-url.defaultZone=http://127.0.0.1:9998/eureka/,http://127.0
 
 ![](pic/6.png)
 
-###3.6 Eureka Server实现安全验证
+#### 1.3.6 Eureka Server实现安全验证
 
 默认情况下Eureka Server允许匿名访问，这里创建一个需要登录后才能访问Eureka Server
 
@@ -431,7 +463,7 @@ http://user:password@127.0.0.1:9997/eureka/,http://user:password@127.0.0.1:9998/
 </code>
 </pre>
 
-###3.7 使用Ribbon实现客户端负载均衡
+#### 1.3.7 使用Ribbon实现客户端负载均衡
 
 > Ribbon是Netflix发布的负载均衡器,有助于控制HTTP和TCP客户端的行为，为Ribbon配置服务提供者地址列表后，Ribbon可以基于负载均衡算法(例如轮询、随机)自动的帮助消费者去请求。 
 在SpringCloud中,当Ribbon与Eureka配合使用时，Ribbon可自动从Eureka Server获取服务提供者地址列表，并基于负载均衡算法，请求其中一个服务提供者实例。
@@ -504,7 +536,7 @@ public class UserController {
 
 由上图可知，已实现负载均衡。
 
-###3.8 使用Feign实现声明式REST调用
+#### 1.3.8 使用Feign实现声明式REST调用
 
 > Feign是Netflix公司开发的声明式、模板化的HTTP客户端，其主要用途是更加便捷、优雅的调用HTTP API,Spring Cloud在原有基础上使Feign支持SpringMVC注解，并且整合了Ribbon和Eureka。
 
@@ -586,7 +618,7 @@ public class DemoFeignH5Application {
 
 ![](pic/12.png)
 
-###3.9 使用Hystrix实现微服务的容错处理
+#### 1.3.9 使用Hystrix实现微服务的容错处理
 
 > 熔断器，容错管理工具，旨在通过熔断机制控制服务和第三方库的节点,从而对延迟和故障提供更强大的容错能力。
 
@@ -658,7 +690,7 @@ public class UserController {
 
 ![](pic/13.png)
 
-###3.10 使用Zuul实现统一网关
+#### 1.3.10 使用Zuul实现统一网关
 
 > Zuul是Netflix出品的一个基于JVM路由和服务端的负载均衡器。
 
@@ -699,6 +731,10 @@ public class DemoZuulServerApplication {
 
 ![](pic/16.png)
 
-##4. 最后，提供一张图总结
+## 2. 为什么这么用？
+
+### 2.1 Eureka服务发现与注册的机制
+
+### 2.2 Ribbon客户端负载原理
 
 

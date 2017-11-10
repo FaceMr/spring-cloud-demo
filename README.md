@@ -302,7 +302,7 @@ eureka.server.enable-self-preservation=false
         &lt;groupId>org.springframework.cloud&lt;/groupId>
         &lt;artifactId>spring-cloud-starter-eureka&lt;/artifactId>
     &lt;/dependency>
-</code
+</code>
 </pre>
 
 * application.properties里面添加

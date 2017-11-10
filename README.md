@@ -3,13 +3,13 @@
 罗洪佳 JAVA-AI _2017.11.08_    
 
 >[Spring-Cloud中文文档](https://demo.cc/spring-cloud-dalston.html)
+
 ##0. 写在开始
 
 为什么要用微服务？
 
 在微服务架构中，当一个大型系统被拆分成微服务系统以后，不仅包括功能拆分，还包括系统拆分、代码拆分、数据库拆分、缓存拆分等，多个系统的部署、维护、调用关系、调度、监控、fail over就会成为一系列问题。同时微服务系统划分越多，调用链路可能会越长，调用链监控、全链路trace也会成为问题。
 自然和自然的法则在黑夜中隐藏，上帝说让牛顿诞生吧，于是一切都被照亮。spring cloud 就是这样诞生的。spring cloud为服务治理而生。
-
 
 ##1. Spring Cloud集成说明
 
@@ -64,6 +64,7 @@ _这些项目是Spring Cloud官方项目或是对Spring Cloud进行了有益的�
     Feign是一种声明式、模板化的HTTP客户端。
 
 ##2. Spring Cloud特性
+
 ###特性
 
 - Spring Cloud专注于提供良好的开箱即用经验的典型用例和可扩展性机制覆盖。
@@ -83,6 +84,7 @@ _这些项目是Spring Cloud官方项目或是对Spring Cloud进行了有益的�
 - 分布式消息传递
 
 ##3. 示例
+
 <pre>
 本示例主要涉及到：Spring boot, Eureka, Ribbon, Feign, Hystrix, Zuul
 </pre>
@@ -210,6 +212,7 @@ public class UserController {
 </pre>
 
 消费者直连生产者测试
+
 ![消费者直连生产者](pic/1.png)
 
 ###3.3 使用Eureka实现服务发现组件
@@ -255,6 +258,7 @@ eureka.server.enable-self-preservation=false
 ![Eureka界面](pic/2.png)
 
 ###3.4 服务注册
+
 搭建好Eureka注册中心后，就可以将刚才的service注册到上面。
 
 步骤同样很简单
@@ -298,6 +302,7 @@ eureka.server.enable-self-preservation=false
 </pre>
 
 运行 DemoEurekaServerApplication 启动Eureka服务，然后运行 DemoServiceMasterApplication，进入Eureka界面查看。
+
 ![服务注册](pic/3.png)
 
 ###3.5 Eureka Server 高可用实现

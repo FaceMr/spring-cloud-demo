@@ -735,6 +735,360 @@ public class DemoZuulServerApplication {
 
 ### 2.1 Eureka服务发现与注册的机制
 
+#### 2.1.1 Eureka客户端
+
+先看看我们怎么用Eureka的？
+
+<pre>
+<code>
+@EnableDiscoveryClient
+@SpringBootApplication
+public class DemoServiceMasterApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DemoServiceMasterApplication.class, args);
+    }
+}
+</code>
+</pre>
+
+很明显，@EnableDiscoveryClient 声明了这是一个Eureka客户端，自然从这儿开始。先看源码：
+
+<pre>
+<code>
+/**
+ * Annotation to enable a DiscoveryClient implementation.
+ * @author Spencer Gibb
+ */
+@Target(ElementType.TYPE)
+@Retention(RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+@Import(EnableDiscoveryClientImportSelector.class)
+public @interface EnableDiscoveryClient {
+}
+</code>
+</pre>
+源码说的很明白：Annotation to enable a DiscoveryClient implementation。注解将开启一个DiscoveryClient实例。
+那就接着看DiscoveryClient，至于怎么开启的，猜测是AOP生成一个DiscoveryClient。
+
+DiscoveryClient是一个接口，CTRL+T（eclipse）看看他的关系：
+
+![](pic/17.png)
+
+嗯，接着看EurekaDiscoveryClient。它持有EurekaClient实例。而EurekaClient是com.netflix包里面的接口，具体的注册逻辑应该就在里面了。看看它的结构
+
+![](pic/18.png)
+
+有两个实现，一个是CloudEurekaClient（SpringCloud包），一个是DiscoveryClient（Netflix包）。查看源码后得知，CloudEurekaClient继承了DiscoveryClient。
+并且调用了DiscoveryClient的构造函数
+<pre>
+<code>
+public class CloudEurekaClient extends DiscoveryClient {
+    private static final Log log = LogFactory.getLog(CloudEurekaClient.class);
+    private final AtomicLong cacheRefreshedCount;
+    private ApplicationContext context;
+
+    public CloudEurekaClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, ApplicationContext context) {
+        this(applicationInfoManager, config, (DiscoveryClientOptionalArgs)null, context);
+    }
+
+    public CloudEurekaClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, DiscoveryClientOptionalArgs args, ApplicationContext context) {
+        super(applicationInfoManager, config, args);// 这儿实例化了一个Eureka的DiscoveryClient
+        this.cacheRefreshedCount = new AtomicLong(0L);
+        this.context = context;
+    }
+
+    protected void onCacheRefreshed() {
+        if (this.cacheRefreshedCount != null) {
+            long newCount = this.cacheRefreshedCount.incrementAndGet();
+            log.trace("onCacheRefreshed called with count: " + newCount);
+            this.context.publishEvent(new HeartbeatEvent(this, newCount));
+        }
+
+    }
+}
+</code>
+</pre>
+
+到此基本进入了服务注册的核心了。先把之前的几个类和接口的关系梳理下：
+
+![](pic/19.png)
+
+然后，接着看DiscoveryClient，从刚才调用的构造方法开始：
+
+<pre>
+<code>
+    DiscoveryClient(ApplicationInfoManager applicationInfoManager, EurekaClientConfig config, DiscoveryClient.DiscoveryClientOptionalArgs args, Provider<BackupRegistry> backupRegistryProvider) {
+        this.RECONCILE_HASH_CODES_MISMATCH = Monitors.newCounter("DiscoveryClient_ReconcileHashCodeMismatch");
+        this.FETCH_REGISTRY_TIMER = Monitors.newTimer("DiscoveryClient_FetchRegistry");
+        
+        ...// 不展现了 太多了
+        
+        // 这儿判断了是否Eureka注册
+        if (!config.shouldRegisterWithEureka() && !config.shouldFetchRegistry()) {
+        
+            ...// 不展现了 太多了
+            
+        } else {
+            try {
+                this.scheduler = Executors.newScheduledThreadPool(3, (new ThreadFactoryBuilder()).setNameFormat("DiscoveryClient-%d").setDaemon(true).build());
+                this.heartbeatExecutor = new ThreadPoolExecutor(1, this.clientConfig.getHeartbeatExecutorThreadPoolSize(), 0L, TimeUnit.SECONDS, new SynchronousQueue(), (new ThreadFactoryBuilder()).setNameFormat("DiscoveryClient-HeartbeatExecutor-%d").setDaemon(true).build());
+                this.cacheRefreshExecutor = new ThreadPoolExecutor(1, this.clientConfig.getCacheRefreshExecutorThreadPoolSize(), 0L, TimeUnit.SECONDS, new SynchronousQueue(), (new ThreadFactoryBuilder()).setNameFormat("DiscoveryClient-CacheRefreshExecutor-%d").setDaemon(true).build());
+                this.eurekaTransport = new DiscoveryClient.EurekaTransport(null);
+                this.scheduleServerEndpointTask(this.eurekaTransport, args);
+                Object azToRegionMapper;
+                if (this.clientConfig.shouldUseDnsForFetchingServiceUrls()) {
+                    azToRegionMapper = new DNSBasedAzToRegionMapper(this.clientConfig);
+                } else {
+                    azToRegionMapper = new PropertyBasedAzToRegionMapper(this.clientConfig);
+                }
+
+                if (null != this.remoteRegionsToFetch.get()) {
+                    ((AzToRegionMapper)azToRegionMapper).setRegionsToFetch(((String)this.remoteRegionsToFetch.get()).split(","));
+                }
+
+                this.instanceRegionChecker = new InstanceRegionChecker((AzToRegionMapper)azToRegionMapper, this.clientConfig.getRegion());
+            } catch (Throwable var8) {
+                throw new RuntimeException("Failed to initialize DiscoveryClient!", var8);
+            }
+
+            if (this.clientConfig.shouldFetchRegistry() && !this.fetchRegistry(false)) {
+                this.fetchRegistryFromBackup();
+            }
+            // 真正的注册入口
+            this.initScheduledTasks();
+
+            try {
+                Monitors.registerObject(this);
+            } catch (Throwable var7) {
+                logger.warn("Cannot register timers", var7);
+            }
+
+            DiscoveryManager.getInstance().setDiscoveryClient(this);
+            DiscoveryManager.getInstance().setEurekaClientConfig(config);
+            this.initTimestampMs = System.currentTimeMillis();
+            logger.info("Discovery Client initialized at timestamp {} with initial instances count: {}", this.initTimestampMs, this.getApplications().size());
+        }
+    }
+</code>
+</pre>
+
+查看initScheduledTasks方法，从名字就能看出来，这是启动了一些task。
+
+<pre>
+<code>
+    private void initScheduledTasks() {
+        // 设置间隔时间等
+        int renewalIntervalInSecs;
+        int expBackOffBound;
+        if (this.clientConfig.shouldFetchRegistry()) {
+            renewalIntervalInSecs = this.clientConfig.getRegistryFetchIntervalSeconds();
+            expBackOffBound = this.clientConfig.getCacheRefreshExecutorExponentialBackOffBound();
+            // 服务刷新
+            this.scheduler.schedule(new TimedSupervisorTask("cacheRefresh", this.scheduler, this.cacheRefreshExecutor, renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new DiscoveryClient.CacheRefreshThread()), (long)renewalIntervalInSecs, TimeUnit.SECONDS);
+        }
+        
+        // 如果使用Eureka注册
+        if (this.clientConfig.shouldRegisterWithEureka()) {
+            renewalIntervalInSecs = this.instanceInfo.getLeaseInfo().getRenewalIntervalInSecs();
+            expBackOffBound = this.clientConfig.getHeartbeatExecutorExponentialBackOffBound();
+            logger.info("Starting heartbeat executor: renew interval is: " + renewalIntervalInSecs);
+            // 心跳（续约）
+            this.scheduler.schedule(new TimedSupervisorTask("heartbeat", this.scheduler, this.heartbeatExecutor, renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new DiscoveryClient.HeartbeatThread(null)), (long)renewalIntervalInSecs, TimeUnit.SECONDS);
+            // 注册实例
+            this.instanceInfoReplicator = new InstanceInfoReplicator(this, this.instanceInfo, this.clientConfig.getInstanceInfoReplicationIntervalSeconds(), 2);
+            // 状态改变的监听
+            this.statusChangeListener = new StatusChangeListener() {
+                public String getId() {
+                    return "statusChangeListener";
+                }
+
+                public void notify(StatusChangeEvent statusChangeEvent) {
+                    if (InstanceStatus.DOWN != statusChangeEvent.getStatus() && InstanceStatus.DOWN != statusChangeEvent.getPreviousStatus()) {
+                        DiscoveryClient.logger.info("Saw local status change event {}", statusChangeEvent);
+                    } else {
+                        DiscoveryClient.logger.warn("Saw local status change event {}", statusChangeEvent);
+                    }
+
+                    DiscoveryClient.this.instanceInfoReplicator.onDemandUpdate();
+                }
+            };
+            if (this.clientConfig.shouldOnDemandUpdateStatusChange()) {
+                // 注册中心状态变更监听委托给applicationInfoManager
+                this.applicationInfoManager.registerStatusChangeListener(this.statusChangeListener);
+            }
+            // 启动注册
+            this.instanceInfoReplicator.start(this.clientConfig.getInitialInstanceInfoReplicationIntervalSeconds());
+        } else {
+            logger.info("Not registering with Eureka server per configuration");
+        }
+
+    }
+</code>
+</pre>
+
+initScheduledTasks启动了4种任务：
+
+* 服务刷新
+* 心跳（续约）
+* 启动注册
+* 状态改变的监听
+
+我们先讲服务注册，InstanceInfoReplicator是注册实例的入口，它实现了Runnable，查看InstanceInfoReplicator的start方法
+
+<pre>
+<code>
+    public void start(int initialDelayMs) {
+        if (this.started.compareAndSet(false, true)) {
+            this.instanceInfo.setIsDirty();
+            // 延迟启动注册。
+            Future next = this.scheduler.schedule(this, (long)initialDelayMs, TimeUnit.SECONDS);
+            this.scheduledPeriodicRef.set(next);
+        }
+    }
+</code>
+</pre>
+
+InstanceInfoReplicator的实例通过ScheduledExecutorService启动，查看它实现的Runnable的run方法
+
+<pre>
+<code>
+    public void run() {
+        try {
+            discoveryClient.refreshInstanceInfo();
+            Long dirtyTimestamp = instanceInfo.isDirtyWithTime();
+            if (dirtyTimestamp != null) {
+                discoveryClient.register();
+                instanceInfo.unsetIsDirty(dirtyTimestamp);
+            }
+        } catch (Throwable t) {
+            logger.warn("There was a problem with the instance info replicator", t);
+        } finally {
+            Future next = scheduler.schedule(this, replicationIntervalSeconds, TimeUnit.SECONDS);
+            scheduledPeriodicRef.set(next);
+        }
+    }
+</code>
+</pre>
+
+很明显 this.discoveryClient.register();这是注册。继续看它里面的逻辑
+
+<pre>
+<code>
+    boolean register() throws Throwable {
+        logger.info(PREFIX + appPathIdentifier + ": registering service...");
+        EurekaHttpResponse<Void> httpResponse;
+        try {
+            httpResponse = eurekaTransport.registrationClient.register(instanceInfo);
+        } catch (Exception e) {
+            logger.warn("{} - registration failed {}", PREFIX + appPathIdentifier, e.getMessage(), e);
+            throw e;
+        }
+        if (logger.isInfoEnabled()) {
+            logger.info("{} - registration status: {}", PREFIX + appPathIdentifier, httpResponse.getStatusCode());
+        }
+        return httpResponse.getStatusCode() == 204;
+    }
+</code>
+</pre>
+
+相信看到这儿，大家已经都懂了。最后的注册其实就是通过Eureka封装的Http方法去通知Eureka服务。
+
+那服务刷新怎么实现的呢？ 回到上面讲 initScheduledTasks 启动了4种任务，其中，服务刷新代码如下：
+
+<pre>
+<code>
+// 定时器定时执行服务刷新
+this.scheduler.schedule(new TimedSupervisorTask("cacheRefresh", this.scheduler, this.cacheRefreshExecutor, renewalIntervalInSecs, TimeUnit.SECONDS, expBackOffBound, new DiscoveryClient.CacheRefreshThread()), (long)renewalIntervalInSecs, TimeUnit.SECONDS);
+</code>
+</pre>
+
+刷新服务的任务：new DiscoveryClient.CacheRefreshThread() 调用内部类实例化了一个TASK
+
+<pre>
+<code>
+    class CacheRefreshThread implements Runnable {
+        CacheRefreshThread() {
+        }
+
+        public void run() {
+            DiscoveryClient.this.refreshRegistry();
+        }
+    }
+</code>
+</pre>
+
+<pre>
+<code>
+    @VisibleForTesting
+    void refreshRegistry() {
+        try {
+            boolean isFetchingRemoteRegionRegistries = this.isFetchingRemoteRegionRegistries();
+            boolean remoteRegionsModified = false;
+            String latestRemoteRegions = this.clientConfig.fetchRegistryForRemoteRegions();
+            ... // Region Zone的处理
+            
+            // 刷新服务
+            boolean success = this.fetchRegistry(remoteRegionsModified);
+            if (success) {
+                this.registrySize = ((Applications)this.localRegionApps.get()).size();
+                this.lastSuccessfulRegistryFetchTimestamp = System.currentTimeMillis();
+            }
+
+            if (logger.isDebugEnabled()) {
+                ...// 略                
+            }
+        } catch (Throwable var9) {
+            logger.error("Cannot fetch registry from server", var9);
+        }
+
+    }
+</code>
+</pre>
+
+在boolean success = this.fetchRegistry(remoteRegionsModified);里面也是通过HTTP去请求服务端的一个接口，实现服务刷新。同样的心跳服务（服务续约）也是一样，就不再展开。
+
+#### 2.1.2 Eureka服务端
+
+同样的，我们先还是从使用注解开始
+
+<pre>
+<code>
+@EnableEurekaServer
+@SpringBootApplication
+public class DemoEurekaServerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(DemoEurekaServerApplication.class, args);
+    }
+}
+</code>
+</pre>
+
+注解EnableEurekaServer开启了一个Eureka服务，通过引用的pom可以知道，调用了spring-cloud-starter-eureka。最终实现eureka的是eureka-core包。
+在此包下面可以找到一个EurekaBootStrap，这个名字一看就知道是开始的入口。我就是这样找的。进入此类发现它是基于servlet的。
+<pre>
+<code>
+public class EurekaBootStrap implements ServletContextListener {
+    ...// 略
+    
+    public void contextInitialized(ServletContextEvent event) {
+        try {
+            this.initEurekaEnvironment();
+            this.initEurekaServerContext();
+            ServletContext sc = event.getServletContext();
+            sc.setAttribute(EurekaServerContext.class.getName(), this.serverContext);
+        } catch (Throwable var3) {
+            logger.error("Cannot bootstrap eureka server :", var3);
+            throw new RuntimeException("Cannot bootstrap eureka server :", var3);
+        }
+    }
+}
+</code>
+</pre>
+
+直接看contextInitialized方法，发现里面的initEurekaServerContext()方法实现了注册相关的内容。
+
 ### 2.2 Ribbon客户端负载原理
 
+未完待续
 
